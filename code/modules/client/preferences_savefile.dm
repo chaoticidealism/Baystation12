@@ -170,6 +170,7 @@
 	S["skills"]				>> skills
 	S["skill_specialization"] >> skill_specialization
 	S["organ_data"]			>> organ_data
+	S["rlimb_data"]			>> rlimb_data
 	S["gear"]				>> gear
 	S["home_system"] 		>> home_system
 	S["citizenship"] 		>> citizenship
@@ -187,10 +188,15 @@
 
 	//Sanitize
 	metadata		= sanitize_text(metadata, initial(metadata))
-	real_name		= reject_bad_name(real_name)
 
 	if(isnull(species) || !(species in playable_species))
 		species = "Human"
+
+	var/datum/species/cur_species = all_species[species]
+	if(istype(cur_species))
+		real_name = cur_species.sanitize_name(real_name)
+	else
+		real_name = sanitizeName(real_name)
 
 	if(isnum(underwear))
 		var/list/undies = gender == MALE ? underwear_m : underwear_f
@@ -240,6 +246,7 @@
 	if(isnull(disabilities)) disabilities = 0
 	if(!player_alt_titles) player_alt_titles = new()
 	if(!organ_data) src.organ_data = list()
+	if(!rlimb_data) src.rlimb_data = list()
 	if(!gear) src.gear = list()
 	//if(!skin_style) skin_style = "Default"
 
@@ -324,6 +331,7 @@
 	S["skills"]				<< skills
 	S["skill_specialization"] << skill_specialization
 	S["organ_data"]			<< organ_data
+	S["rlimb_data"]			<< rlimb_data
 	S["gear"]				<< gear
 	S["home_system"] 		<< home_system
 	S["citizenship"] 		<< citizenship

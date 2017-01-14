@@ -1,21 +1,3 @@
-var/global/list/holodeck_programs = list(
-	"emptycourt" = /area/holodeck/source_emptycourt,		\
-	"boxingcourt" =	/area/holodeck/source_boxingcourt,	\
-	"basketball" =	/area/holodeck/source_basketball,	\
-	"thunderdomecourt" =	/area/holodeck/source_thunderdomecourt,	\
-	"beach" =	/area/holodeck/source_beach,	\
-	"desert" =	/area/holodeck/source_desert,	\
-	"space" =	/area/holodeck/source_space,	\
-	"picnicarea" = /area/holodeck/source_picnicarea,	\
-	"snowfield" =	/area/holodeck/source_snowfield,	\
-	"theatre" =	/area/holodeck/source_theatre,	\
-	"meetinghall" =	/area/holodeck/source_meetinghall,	\
-	"courtroom" =	/area/holodeck/source_courtroom,	\
-	"burntest" = 	/area/holodeck/source_burntest,	\
-	"wildlifecarp" = 	/area/holodeck/source_wildlife,	\
-	"turnoff" = 	/area/holodeck/source_plating	\
-	)
-
 /obj/machinery/computer/HolodeckControl
 	name = "holodeck control console"
 	desc = "A computer used to control a nearby holodeck."
@@ -23,46 +5,54 @@ var/global/list/holodeck_programs = list(
 
 	use_power = 1
 	active_power_usage = 8000 //8kW for the scenery + 500W per holoitem
+
+	circuit = /obj/item/weapon/circuitboard/holodeckcontrol
+
 	var/item_power_usage = 500
 
 	var/area/linkedholodeck = null
-	var/area/target = null
+	var/linkedholodeck_area
 	var/active = 0
-	var/list/holographic_items = list()
+	var/list/holographic_objs = list()
 	var/list/holographic_mobs = list()
 	var/damaged = 0
 	var/safety_disabled = 0
 	var/mob/last_to_emag = null
 	var/last_change = 0
 	var/last_gravity_change = 0
-	var/list/supported_programs = list( \
-	"Empty Court" = "emptycourt", \
-	"Basketball Court" = "basketball",	\
-	"Thunderdome Court" = "thunderdomecourt",	\
-	"Boxing Ring"="boxingcourt",	\
-	"Beach" = "beach",	\
-	"Desert" = "desert",	\
-	"Space" = "space",	\
-	"Picnic Area" = "picnicarea",	\
-	"Snow Field" = "snowfield",	\
-	"Theatre" = "theatre",	\
-	"Meeting Hall" = "meetinghall",	\
-	"Courtroom" = "courtroom"	\
-	)
-	var/list/restricted_programs = list("Atmospheric Burn Simulation" = "burntest", "Wildlife Simulation" = "wildlifecarp")
+	var/list/supported_programs
+	var/list/restricted_programs
+
+/obj/machinery/computer/HolodeckControl/New()
+	..()
+	linkedholodeck = locate(linkedholodeck_area)
+	supported_programs = list()
+	restricted_programs = list()
 
 /obj/machinery/computer/HolodeckControl/attack_ai(var/mob/user as mob)
 	return src.attack_hand(user)
 
 /obj/machinery/computer/HolodeckControl/attack_hand(var/mob/user as mob)
-
 	if(..())
-		return
+		return 1
 	user.set_machine(src)
 	var/dat
 
 	dat += "<B>Holodeck Control System</B><BR>"
 	dat += "<HR>Current Loaded Programs:<BR>"
+
+	if(!linkedholodeck)
+		dat += "<span class='danger'>Warning: Unable to locate holodeck.<br></span>"
+		user << browse(dat, "window=computer;size=400x500")
+		onclose(user, "computer")
+		return
+
+	if(!supported_programs.len)
+		dat += "<span class='danger'>Warning: No supported holo-programs loaded.<br></span>"
+		user << browse(dat, "window=computer;size=400x500")
+		onclose(user, "computer")
+		return
+
 	for(var/prog in supported_programs)
 		dat += "<A href='?src=\ref[src];program=[supported_programs[prog]]'>([prog])</A><BR>"
 
@@ -100,9 +90,7 @@ var/global/list/holodeck_programs = list(
 
 	user << browse(dat, "window=computer;size=400x500")
 	onclose(user, "computer")
-
 	return
-
 
 /obj/machinery/computer/HolodeckControl/Topic(href, href_list)
 	if(..())
@@ -113,9 +101,7 @@ var/global/list/holodeck_programs = list(
 		if(href_list["program"])
 			var/prog = href_list["program"]
 			if(prog in holodeck_programs)
-				target = locate(holodeck_programs[prog])
-				if(target)
-					loadProgram(target)
+				loadProgram(holodeck_programs[prog])
 
 		else if(href_list["AIoverride"])
 			if(!issilicon(usr))
@@ -140,19 +126,20 @@ var/global/list/holodeck_programs = list(
 	src.updateUsrDialog()
 	return
 
-/obj/machinery/computer/HolodeckControl/attackby(var/obj/item/weapon/D as obj, var/mob/user as mob)
-	if(istype(D, /obj/item/weapon/card/emag))
-		playsound(src.loc, 'sound/effects/sparks4.ogg', 75, 1)
-		last_to_emag = user //emag again to change the owner
-		if (!emagged)
-			emagged = 1
-			safety_disabled = 1
-			update_projections()
-			user << "<span class='notice'>You vastly increase projector power and override the safety and security protocols.</span>"
-			user << "Warning.  Automatic shutoff and derezing protocols have been corrupted.  Please call Nanotrasen maintenance and do not use the simulator."
-			log_game("[key_name(usr)] emagged the Holodeck Control Computer")
-	src.updateUsrDialog()
-	return
+/obj/machinery/computer/HolodeckControl/emag_act(var/remaining_charges, var/mob/user as mob)
+	playsound(src.loc, 'sound/effects/sparks4.ogg', 75, 1)
+	last_to_emag = user //emag again to change the owner
+	if (!emagged)
+		emagged = 1
+		safety_disabled = 1
+		update_projections()
+		user << "<span class='notice'>You vastly increase projector power and override the safety and security protocols.</span>"
+		user << "Warning.  Automatic shutoff and derezing protocols have been corrupted.  Please call Nanotrasen maintenance and do not use the simulator."
+		log_game("[key_name(usr)] emagged the Holodeck Control Computer")
+		return 1
+		src.updateUsrDialog()
+	else
+		..()
 
 /obj/machinery/computer/HolodeckControl/proc/update_projections()
 	if (safety_disabled)
@@ -169,28 +156,10 @@ var/global/list/holodeck_programs = list(
 		if (last_to_emag)
 			C.friends = list(last_to_emag)
 
-/obj/machinery/computer/HolodeckControl/New()
-	..()
-	linkedholodeck = locate(/area/holodeck/alphadeck)
-	//if(linkedholodeck)
-	//	target = locate(/area/holodeck/source_emptycourt)
-	//	if(target)
-	//		loadProgram(target)
-
 //This could all be done better, but it works for now.
-/obj/machinery/computer/HolodeckControl/Del()
+/obj/machinery/computer/HolodeckControl/Destroy()
 	emergencyShutdown()
 	..()
-
-/obj/machinery/computer/HolodeckControl/meteorhit(var/obj/O as obj)
-	emergencyShutdown()
-	..()
-
-
-/obj/machinery/computer/HolodeckControl/emp_act(severity)
-	emergencyShutdown()
-	..()
-
 
 /obj/machinery/computer/HolodeckControl/ex_act(severity)
 	emergencyShutdown()
@@ -208,7 +177,7 @@ var/global/list/holodeck_programs = list(
 		emergencyShutdown()
 
 /obj/machinery/computer/HolodeckControl/process()
-	for(var/item in holographic_items) // do this first, to make sure people don't take items out when power is down.
+	for(var/item in holographic_objs) // do this first, to make sure people don't take items out when power is down.
 		if(!(get_turf(item) in linkedholodeck))
 			derez(item, 0)
 
@@ -221,13 +190,11 @@ var/global/list/holodeck_programs = list(
 	if(!..())
 		return
 	if(active)
-		use_power(item_power_usage * (holographic_items.len + holographic_mobs.len))
+		use_power(item_power_usage * (holographic_objs.len + holographic_mobs.len))
 
 		if(!checkInteg(linkedholodeck))
 			damaged = 1
-			target = locate(/area/holodeck/source_plating)
-			if(target)
-				loadProgram(target)
+			loadProgram(holodeck_programs["turnoff"], 0)
 			active = 0
 			use_power = 1
 			for(var/mob/M in range(10,src))
@@ -243,7 +210,7 @@ var/global/list/holodeck_programs = list(
 				T.hotspot_expose(1000,500,1)
 
 /obj/machinery/computer/HolodeckControl/proc/derez(var/obj/obj , var/silent = 1)
-	holographic_items.Remove(obj)
+	holographic_objs.Remove(obj)
 
 	if(obj == null)
 		return
@@ -251,13 +218,13 @@ var/global/list/holodeck_programs = list(
 	if(isobj(obj))
 		var/mob/M = obj.loc
 		if(ismob(M))
-			M.u_equip(obj)
+			M.remove_from_mob(obj)
 			M.update_icons()	//so their overlays update
 
 	if(!silent)
 		var/obj/oldobj = obj
 		visible_message("The [oldobj.name] fades away!")
-	del(obj)
+	qdel(obj)
 
 /obj/machinery/computer/HolodeckControl/proc/checkInteg(var/area/A)
 	for(var/turf/T in A)
@@ -268,52 +235,39 @@ var/global/list/holodeck_programs = list(
 
 //Why is it called toggle if it doesn't toggle?
 /obj/machinery/computer/HolodeckControl/proc/togglePower(var/toggleOn = 0)
-
 	if(toggleOn)
-		var/area/targetsource = locate(/area/holodeck/source_emptycourt)
-		holographic_items = targetsource.copy_contents_to(linkedholodeck)
-
-		spawn(30)
-			for(var/obj/effect/landmark/L in linkedholodeck)
-				if(L.name=="Atmospheric Test Start")
-					spawn(20)
-						var/turf/T = get_turf(L)
-						var/datum/effect/effect/system/spark_spread/s = new /datum/effect/effect/system/spark_spread
-						s.set_up(2, 1, T)
-						s.start()
-						if(T)
-							T.temperature = 5000
-							T.hotspot_expose(50000,50000,1)
-
-		active = 1
-		use_power = 2
+		loadProgram(holodeck_programs["emptycourt"], 0)
 	else
-		for(var/item in holographic_items)
-			derez(item)
+		loadProgram(holodeck_programs["turnoff"], 0)
+
 		if(!linkedholodeck.has_gravity)
 			linkedholodeck.gravitychange(1,linkedholodeck)
 
-		var/area/targetsource = locate(/area/holodeck/source_plating)
-		targetsource.copy_contents_to(linkedholodeck , 1)
 		active = 0
 		use_power = 1
 
 
-/obj/machinery/computer/HolodeckControl/proc/loadProgram(var/area/A)
+/obj/machinery/computer/HolodeckControl/proc/loadProgram(var/datum/holodeck_program/HP, var/check_delay = 1)
+	if(!HP)
+		return
+	var/area/A = locate(HP.target)
+	if(!A)
+		return
 
-	if(world.time < (last_change + 25))
-		if(world.time < (last_change + 15))//To prevent super-spam clicking, reduced process size and annoyance -Sieve
-			return
-		for(var/mob/M in range(3,src))
-			M.show_message("\b ERROR. Recalibrating projection apparatus.")
-			last_change = world.time
-			return
+	if(check_delay)
+		if(world.time < (last_change + 25))
+			if(world.time < (last_change + 15))//To prevent super-spam clicking, reduced process size and annoyance -Sieve
+				return
+			for(var/mob/M in range(3,src))
+				M.show_message("\b ERROR. Recalibrating projection apparatus.")
+				last_change = world.time
+				return
 
 	last_change = world.time
 	active = 1
 	use_power = 2
 
-	for(var/item in holographic_items)
+	for(var/item in holographic_objs)
 		derez(item)
 
 	for(var/mob/living/simple_animal/hostile/carp/holodeck/C in holographic_mobs)
@@ -321,9 +275,20 @@ var/global/list/holodeck_programs = list(
 		C.derez()
 
 	for(var/obj/effect/decal/cleanable/blood/B in linkedholodeck)
-		del(B)
+		qdel(B)
 
-	holographic_items = A.copy_contents_to(linkedholodeck , 1)
+	holographic_objs = A.copy_contents_to(linkedholodeck , 1)
+	for(var/obj/holo_obj in holographic_objs)
+		holo_obj.alpha *= 0.8 //give holodeck objs a slight transparency
+
+	if(HP.ambience)
+		linkedholodeck.forced_ambience = HP.ambience
+	else
+		linkedholodeck.forced_ambience = list()
+
+	for(var/mob/living/M in mobs_in_area(linkedholodeck))
+		if(M.mind)
+			linkedholodeck.play_ambience(M)
 
 	spawn(30)
 		for(var/obj/effect/landmark/L in linkedholodeck)
@@ -365,21 +330,36 @@ var/global/list/holodeck_programs = list(
 		A.gravitychange(1,A)
 
 /obj/machinery/computer/HolodeckControl/proc/emergencyShutdown()
-	//Get rid of any items
-	for(var/item in holographic_items)
-		derez(item)
-	for(var/mob/living/simple_animal/hostile/carp/holodeck/C in holographic_mobs)
-		holographic_mobs -= C
-		C.derez()
 	//Turn it back to the regular non-holographic room
-	target = locate(/area/holodeck/source_plating)
-	if(target)
-		loadProgram(target)
+	loadProgram(holodeck_programs["turnoff"], 0)
 
 	if(!linkedholodeck.has_gravity)
 		linkedholodeck.gravitychange(1,linkedholodeck)
 
-	var/area/targetsource = locate(/area/holodeck/source_plating)
-	targetsource.copy_contents_to(linkedholodeck , 1)
 	active = 0
 	use_power = 1
+
+/obj/machinery/computer/HolodeckControl/Exodus
+	linkedholodeck_area = /area/holodeck/alphadeck
+
+/obj/machinery/computer/HolodeckControl/Exodus/New()
+	..()
+	supported_programs = list(
+	"Empty Court" 		= "emptycourt",
+	"Basketball Court" 	= "basketball",
+	"Thunderdome Court"	= "thunderdomecourt",
+	"Boxing Ring"		= "boxingcourt",
+	"Beach" 			= "beach",
+	"Desert" 			= "desert",
+	"Space" 			= "space",
+	"Picnic Area" 		= "picnicarea",
+	"Snow Field" 		= "snowfield",
+	"Theatre" 			= "theatre",
+	"Meeting Hall" 		= "meetinghall",
+	"Courtroom" 		= "courtroom"
+	)
+
+	restricted_programs = list(
+	"Atmospheric Burn Simulation" = "burntest",
+	"Wildlife Simulation" = "wildlifecarp"
+	)

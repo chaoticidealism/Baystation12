@@ -37,7 +37,7 @@ var/global/datum/controller/plants/plant_controller // Set in New().
 /datum/controller/plants/New()
 	if(plant_controller && plant_controller != src)
 		log_debug("Rebuilding plant controller.")
-		del(plant_controller)
+		qdel(plant_controller)
 	plant_controller = src
 	setup()
 	process()
@@ -66,7 +66,9 @@ var/global/datum/controller/plants/plant_controller // Set in New().
 			plant_sprites[base] = ikey
 
 	for(var/icostate in icon_states('icons/obj/hydroponics_products.dmi'))
-		plant_product_sprites |= icostate
+		var/split = findtext(icostate,"-")
+		if(split)
+			plant_product_sprites |= copytext(icostate,1,split)
 
 	// Populate the global seed datum list.
 	for(var/type in typesof(/datum/seed)-/datum/seed)

@@ -9,13 +9,13 @@ datum/pipeline
 
 	var/alert_pressure = 0
 
-	Del()
+	Destroy()
 		if(network)
-			del(network)
+			qdel(network)
 
 		if(air && air.volume)
 			temporarily_store_air()
-			del(air)
+			qdel(air)
 
 		..()
 
@@ -27,9 +27,6 @@ datum/pipeline
 			for(var/obj/machinery/atmospherics/pipe/member in members)
 				if(!member.check_pressure(pressure))
 					break //Only delete 1 pipe per process
-
-		//Allow for reactions
-		//air.react() //Should be handled by pipe_network now
 
 	proc/temporarily_store_air()
 		//Update individual gas_mixtures by volume ratio

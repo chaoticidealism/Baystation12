@@ -12,15 +12,15 @@
 	icon = 'icons/obj/rig_modules.dmi'
 	desc = "A back-mounted hardsuit deployment and control mechanism."
 	slot_flags = SLOT_BACK
-	req_one_access = null
-	req_access = null
+	req_one_access = list()
+	req_access = list()
 	w_class = 4
 
 	// These values are passed on to all component pieces.
 	armor = list(melee = 40, bullet = 5, laser = 20,energy = 5, bomb = 35, bio = 100, rad = 20)
 	min_cold_protection_temperature = SPACE_SUIT_MIN_COLD_PROTECTION_TEMPERATURE
 	max_heat_protection_temperature = SPACE_SUIT_MAX_HEAT_PROTECTION_TEMPERATURE
-	siemens_coefficient = 0.1
+	siemens_coefficient = 0.2
 	permeability_coefficient = 0.1
 	unacidable = 1
 
@@ -64,13 +64,14 @@
 	var/malfunction_delay = 0
 	var/electrified = 0
 	var/locked_down = 0
-	var/locked_dna = null
 
+	var/seal_delay = SEAL_DELAY
 	var/sealing                                               // Keeps track of seal status independantly of canremove.
 	var/offline = 1                                           // Should we be applying suit maluses?
 	var/offline_slowdown = 3                                  // If the suit is deployed and unpowered, it sets slowdown to this.
 	var/vision_restriction
 	var/offline_vision_restriction = 1                        // 0 - none, 1 - welder vision, 2 - blind. Maybe move this to helmets.
+	var/airtight = 1 //If set, will adjust AIRTIGHT and STOPPRESSUREDAMAGE flags on components. Otherwise it should leave them untouched.
 
 	var/emp_protection = 0
 
@@ -134,27 +135,28 @@
 		verbs |= /obj/item/weapon/rig/proc/toggle_chest
 
 	for(var/obj/item/piece in list(gloves,helmet,boots,chest))
-		if(!piece)
+		if(!istype(piece))
 			continue
 		piece.canremove = 0
 		piece.name = "[suit_type] [initial(piece.name)]"
 		piece.desc = "It seems to be part of a [src.name]."
 		piece.icon_state = "[initial(icon_state)]"
-		piece.armor = armor.Copy()
 		piece.min_cold_protection_temperature = min_cold_protection_temperature
 		piece.max_heat_protection_temperature = max_heat_protection_temperature
-		piece.siemens_coefficient = siemens_coefficient
+		if(piece.siemens_coefficient > siemens_coefficient) //So that insulated gloves keep their insulation.
+			piece.siemens_coefficient = siemens_coefficient
 		piece.permeability_coefficient = permeability_coefficient
 		piece.unacidable = unacidable
+		if(islist(armor)) piece.armor = armor.Copy()
 
 	update_icon(1)
 
-/obj/item/weapon/rig/Del()
+/obj/item/weapon/rig/Destroy()
 	for(var/obj/item/piece in list(gloves,boots,helmet,chest))
 		var/mob/living/M = piece.loc
 		if(istype(M))
 			M.drop_from_inventory(piece)
-		del(piece)
+		qdel(piece)
 	processing_objects -= src
 	..()
 
@@ -177,8 +179,9 @@
 	for(var/obj/item/piece in list(helmet,boots,gloves,chest))
 		if(!piece) continue
 		piece.icon_state = "[initial(icon_state)]"
-		piece.flags &= ~STOPPRESSUREDAMAGE
-		piece.flags &= ~AIRTIGHT
+		if(airtight)
+			piece.flags &= ~STOPPRESSUREDAMAGE
+			piece.flags &= ~AIRTIGHT
 	update_icon(1)
 
 /obj/item/weapon/rig/proc/toggle_seals(var/mob/living/carbon/human/M,var/instant)
@@ -204,7 +207,7 @@
 
 		if(!instant)
 			M.visible_message("<font color='blue'>[M]'s suit emits a quiet hum as it begins to adjust its seals.</font>","<font color='blue'>With a quiet hum, the suit begins running checks and adjusting components.</font>")
-			if(!do_after(M,SEAL_DELAY))
+			if(seal_delay && !do_after(M,seal_delay))
 				if(M) M << "<span class='warning'>You must remain still while the suit is adjusting the components.</span>"
 				failed_to_seal = 1
 
@@ -228,9 +231,8 @@
 
 				if(!failed_to_seal && M.back == src && piece == compare_piece)
 
-					if(!instant)
-						if(!do_after(M,SEAL_DELAY,needhand=0))
-							failed_to_seal = 1
+					if(seal_delay && !instant && !do_after(M,seal_delay,needhand=0))
+						failed_to_seal = 1
 
 					piece.icon_state = "[initial(icon_state)][!seal_target ? "_sealed" : ""]"
 					switch(msg_type)
@@ -247,11 +249,6 @@
 							M << "<font color='blue'>\The [piece] hisses [!seal_target ? "closed" : "open"].</font>"
 							M.update_inv_head()
 							if(helmet)
-								if(!seal_target)
-									if(flags & AIRTIGHT)
-										helmet.flags |= AIRTIGHT
-								else
-									helmet.flags &= ~AIRTIGHT
 								helmet.update_light(wearer)
 
 					//sealed pieces become airtight, protecting against diseases
@@ -273,13 +270,8 @@
 			if(!piece) continue
 			piece.icon_state = "[initial(icon_state)][!seal_target ? "" : "_sealed"]"
 		canremove = !seal_target
-		if(helmet)
-			if(canremove)
-				if(flags & AIRTIGHT)
-					helmet.flags |= AIRTIGHT
-			else
-				if(flags & AIRTIGHT)
-					helmet.flags &= ~AIRTIGHT
+		if(airtight)
+			update_component_sealed()
 		update_icon(1)
 		return 0
 
@@ -290,15 +282,18 @@
 	if(canremove)
 		for(var/obj/item/rig_module/module in installed_modules)
 			module.deactivate()
+	if(airtight)
+		update_component_sealed()
+	update_icon(1)
+
+/obj/item/weapon/rig/proc/update_component_sealed()
 	for(var/obj/item/piece in list(helmet,boots,gloves,chest))
-		if(!piece) continue
 		if(canremove)
 			piece.flags &= ~STOPPRESSUREDAMAGE
 			piece.flags &= ~AIRTIGHT
 		else
 			piece.flags |=  STOPPRESSUREDAMAGE
 			piece.flags |=  AIRTIGHT
-	update_icon(1)
 
 /obj/item/weapon/rig/process()
 
@@ -309,7 +304,7 @@
 			if(istype(piece.loc, /mob/living))
 				M = piece.loc
 				M.drop_from_inventory(piece)
-			piece.loc = src
+			piece.forceMove(src)
 
 	if(!istype(wearer) || loc != wearer || wearer.back != src || canremove || !cell || cell.charge <= 0)
 		if(!cell || cell.charge <= 0)
@@ -369,7 +364,7 @@
 	if(sealing)
 		fail_msg = "<span class='warning'>The hardsuit is in the process of adjusting seals and cannot be activated.</span>"
 	else if(!fail_msg && ((use_unconcious && user.stat > 1) || (!use_unconcious && user.stat)))
-		fail_msg = "<span class='warning'>You are in no fit state to do that."
+		fail_msg = "<span class='warning'>You are in no fit state to do that.</span>"
 	else if(!cell)
 		fail_msg = "<span class='warning'>There is no cell installed in the suit.</span>"
 	else if(cost && cell.charge < cost * 10) //TODO: Cellrate?
@@ -388,8 +383,7 @@
 	cell.use(cost*10)
 	return 1
 
-/obj/item/weapon/rig/ui_interact(mob/user, ui_key = "main", var/datum/nanoui/ui = null, var/force_open = 1)
-
+/obj/item/weapon/rig/ui_interact(mob/user, ui_key = "main", var/datum/nanoui/ui = null, var/force_open = 1, var/nano_state = inventory_state)
 	if(!user)
 		return
 
@@ -459,7 +453,7 @@
 
 	ui = nanomanager.try_update_ui(user, src, ui_key, ui, data, force_open)
 	if (!ui)
-		ui = new(user, src, ui_key, ((src.loc != user) ? ai_interface_path : interface_path), interface_title, 480, 550)
+		ui = new(user, src, ui_key, ((src.loc != user) ? ai_interface_path : interface_path), interface_title, 480, 550, state = nano_state)
 		ui.set_initial_data(data)
 		ui.open()
 		ui.set_auto_update(1)
@@ -472,8 +466,8 @@
 		var/species_icon = 'icons/mob/rig_back.dmi'
 		// Since setting mob_icon will override the species checks in
 		// update_inv_wear_suit(), handle species checks here.
-		if(wearer && sprite_sheets && sprite_sheets[wearer.species.name])
-			species_icon =  sprite_sheets[wearer.species.name]
+		if(wearer && sprite_sheets && sprite_sheets[wearer.species.get_bodytype()])
+			species_icon =  sprite_sheets[wearer.species.get_bodytype()]
 		mob_icon = image("icon" = species_icon, "icon_state" = "[icon_state]")
 
 	if(installed_modules.len)
@@ -499,10 +493,6 @@
 			return 0
 		if(user.back != src)
 			return 0
-		if(locked_dna)
-			if(!user.dna || user.dna.unique_enzymes != locked_dna)
-				user << "<span class='danger'>DNA scan mismatch. Access denied.</span>"
-				return 0
 		else if(!src.allowed(user))
 			user << "<span class='danger'>Unauthorized user. Access denied.</span>"
 			return 0
@@ -562,14 +552,13 @@
 /obj/item/weapon/rig/equipped(mob/living/carbon/human/M)
 	..()
 
-	if(istype(M) && M.back == src)
+	if(seal_delay > 0 && istype(M) && M.back == src)
 		M.visible_message("<font color='blue'>[M] starts putting on \the [src]...</font>", "<font color='blue'>You start putting on \the [src]...</font>")
-
-		if(!do_after(M,SEAL_DELAY))
+		if(!do_after(M,seal_delay))
 			if(M && M.back == src)
 				M.back = null
 				M.drop_from_inventory(src)
-			src.loc = get_turf(src)
+			src.forceMove(get_turf(src))
 			return
 
 	if(istype(M) && M.back == src)
@@ -625,20 +614,22 @@
 						H << "<font color='blue'><b>Your [use_obj.name] [use_obj.gender == PLURAL ? "retract" : "retracts"] swiftly.</b></font>"
 						use_obj.canremove = 1
 						holder.drop_from_inventory(use_obj)
-						use_obj.loc = get_turf(src)
+						use_obj.forceMove(get_turf(src))
 						use_obj.dropped()
 						use_obj.canremove = 0
-						use_obj.loc = src
+						use_obj.forceMove(src)
 
 		else if (deploy_mode != ONLY_RETRACT)
 			if(check_slot)
 				if(check_slot != use_obj)
 					H << "<span class='danger'>You are unable to deploy \the [piece] as \the [check_slot] [check_slot.gender == PLURAL ? "are" : "is"] in the way.</span>"
-					return
+				return
 			else
-				H << "<font color='blue'><b>Your [use_obj.name] [use_obj.gender == PLURAL ? "deploy" : "deploys"] swiftly.</b></span>"
-				use_obj.loc = H
-				H.equip_to_slot(use_obj, equip_to)
+				use_obj.forceMove(H)
+				if(!H.equip_to_slot_if_possible(use_obj, equip_to, 0))
+					use_obj.forceMove(src)
+				else
+					H << "<font color='blue'><b>Your [use_obj.name] [use_obj.gender == PLURAL ? "deploy" : "deploys"] swiftly.</b></span>"
 
 	if(piece == "helmet" && helmet)
 		helmet.update_light(H)
@@ -657,25 +648,25 @@
 			var/obj/item/garbage = H.head
 			H.drop_from_inventory(garbage)
 			H.head = null
-			del(garbage)
+			qdel(garbage)
 
 		if(H.gloves)
 			var/obj/item/garbage = H.gloves
 			H.drop_from_inventory(garbage)
 			H.gloves = null
-			del(garbage)
+			qdel(garbage)
 
 		if(H.shoes)
 			var/obj/item/garbage = H.shoes
 			H.drop_from_inventory(garbage)
 			H.shoes = null
-			del(garbage)
+			qdel(garbage)
 
 		if(H.wear_suit)
 			var/obj/item/garbage = H.wear_suit
 			H.drop_from_inventory(garbage)
 			H.wear_suit = null
-			del(garbage)
+			qdel(garbage)
 
 	for(var/piece in list("helmet","gauntlets","chest","boots"))
 		toggle_piece(piece, H, ONLY_DEPLOY)
@@ -696,17 +687,18 @@
 		malfunctioning += 10
 		if(malfunction_delay <= 0)
 			malfunction_delay = max(malfunction_delay, round(30/severity_class))
-	
+
 	//drain some charge
 	if(cell) cell.emp_act(severity_class + 15)
-	
+
 	//possibly damage some modules
 	take_hit((100/severity_class), "electrical pulse", 1)
 
 /obj/item/weapon/rig/proc/shock(mob/user)
-	if (electrocute_mob(user, cell, src))
+	if (electrocute_mob(user, cell, src)) //electrocute_mob() handles removing charge from the cell, no need to do that here.
 		spark_system.start()
-		return 1
+		if(user.stunned)
+			return 1
 	return 0
 
 /obj/item/weapon/rig/proc/take_hit(damage, source, is_emp=0)
@@ -720,7 +712,7 @@
 	else
 		//Want this to be roughly independant of the number of modules, meaning that X emp hits will disable Y% of the suit's modules on average.
 		//that way people designing hardsuits don't have to worry (as much) about how adding that extra module will affect emp resiliance by 'soaking' hits for other modules
-		chance = max(0, damage - emp_protection)*min(installed_modules.len/15, 1)
+		chance = 2*max(0, damage - emp_protection)*min(installed_modules.len/15, 1)
 
 	if(!prob(chance))
 		return
@@ -740,7 +732,7 @@
 		dam_module = pick(damaged_modules)
 	else if(valid_modules.len)
 		dam_module = pick(valid_modules)
-	
+
 	if(!dam_module) return
 
 	dam_module.damage++
@@ -750,7 +742,7 @@
 
 	if(wearer)
 		if(dam_module.damage >= 2)
-			wearer << "<span class='danger'>The [source] has disabled your [dam_module.interface_name]!"
+			wearer << "<span class='danger'>The [source] has disabled your [dam_module.interface_name]!</span>"
 		else
 			wearer << "<span class='warning'>The [source] has damaged your [dam_module.interface_name]!"
 	dam_module.deactivate()
@@ -772,6 +764,15 @@
 	if(!wearer || wearer.back != src)
 		return 0
 	wearer.Move(null,dir)*/
+
+// This returns the rig if you are contained inside one, but not if you are wearing it
+/atom/proc/get_rig()
+	if(loc)
+		return loc.get_rig()
+	return null
+
+/obj/item/weapon/rig/get_rig()
+	return src
 
 #undef ONLY_DEPLOY
 #undef ONLY_RETRACT

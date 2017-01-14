@@ -59,7 +59,7 @@
 	set_trait(TRAIT_HIGHKPA_TOLERANCE,    200)          // High pressure capacity.
 	set_trait(TRAIT_IDEAL_HEAT,           293)          // Preferred temperature in Kelvin.
 	set_trait(TRAIT_NUTRIENT_CONSUMPTION, 0.25)         // Plant eats this much per tick.
-	set_trait(TRAIT_PLANT_COLOUR,         "#6EF86A")    // Colour of the plant icon.
+	set_trait(TRAIT_PLANT_COLOUR,         "#46B543")    // Colour of the plant icon.
 
 	spawn(5)
 		sleep(-1)
@@ -67,6 +67,9 @@
 
 /datum/seed/proc/get_trait(var/trait)
 	return traits["[trait]"]
+
+/datum/seed/proc/get_trash_type()
+	return trash_type
 
 /datum/seed/proc/set_trait(var/trait,var/nval,var/ubound,var/lbound, var/degrade)
 	if(!isnull(degrade)) nval *= degrade
@@ -102,27 +105,27 @@
 	if(!istype(target))
 		if(istype(target, /mob/living/simple_animal/mouse))
 			new /obj/effect/decal/remains/mouse(get_turf(target))
-			del(target)
+			qdel(target)
 		else if(istype(target, /mob/living/simple_animal/lizard))
 			new /obj/effect/decal/remains/lizard(get_turf(target))
-			del(target)
+			qdel(target)
 		return
 
 
 	if(!target_limb) target_limb = pick("l_foot","r_foot","l_leg","r_leg","l_hand","r_hand","l_arm", "r_arm","head","chest","groin")
-	var/datum/organ/external/affecting = target.get_organ(target_limb)
+	var/obj/item/organ/external/affecting = target.get_organ(target_limb)
 	var/damage = 0
 
 	if(get_trait(TRAIT_CARNIVOROUS))
 		if(get_trait(TRAIT_CARNIVOROUS) == 2)
 			if(affecting)
-				target << "<span class='danger'>\The [fruit]'s thorns pierce your [affecting.display_name] greedily!</span>"
+				target << "<span class='danger'>\The [fruit]'s thorns pierce your [affecting.name] greedily!</span>"
 			else
 				target << "<span class='danger'>\The [fruit]'s thorns pierce your flesh greedily!</span>"
 			damage = get_trait(TRAIT_POTENCY)/2
 		else
 			if(affecting)
-				target << "<span class='danger'>\The [fruit]'s thorns dig deeply into your [affecting.display_name]!</span>"
+				target << "<span class='danger'>\The [fruit]'s thorns dig deeply into your [affecting.name]!</span>"
 			else
 				target << "<span class='danger'>\The [fruit]'s thorns dig deeply into your flesh!</span>"
 			damage = get_trait(TRAIT_POTENCY)/5
@@ -142,6 +145,17 @@
 	if(!get_trait(TRAIT_STINGS))
 		return
 	if(chems && chems.len)
+
+		var/body_coverage = HEAD|FACE|EYES|UPPER_TORSO|LOWER_TORSO|LEGS|FEET|ARMS|HANDS
+
+		for(var/obj/item/clothing/clothes in target)
+			if(target.l_hand == clothes|| target.r_hand == clothes)
+				continue
+			body_coverage &= ~(clothes.body_parts_covered)
+
+		if(!body_coverage)
+			return
+
 		target << "<span class='danger'>You are stung by \the [fruit]!</span>"
 		for(var/rid in chems)
 			var/injecting = min(5,max(1,get_trait(TRAIT_POTENCY)/5))
@@ -149,16 +163,18 @@
 
 //Splatter a turf.
 /datum/seed/proc/splatter(var/turf/T,var/obj/item/thrown)
-	if(splat_type)
+	if(splat_type && !(locate(/obj/effect/plant) in T))
 		var/obj/effect/plant/splat = new splat_type(T, src)
 		if(!istype(splat)) // Plants handle their own stuff.
 			splat.name = "[thrown.name] [pick("smear","smudge","splatter")]"
 			if(get_trait(TRAIT_BIOLUM))
+				var/clr
 				if(get_trait(TRAIT_BIOLUM_COLOUR))
-					splat.l_color = get_trait(TRAIT_BIOLUM_COLOUR)
-				splat.SetLuminosity(get_trait(TRAIT_BIOLUM))
-			if(get_trait(TRAIT_PRODUCT_COLOUR))
-				splat.color = get_trait(TRAIT_PRODUCT_COLOUR)
+					clr = get_trait(TRAIT_BIOLUM_COLOUR)
+				splat.set_light(get_trait(TRAIT_BIOLUM), l_color = clr)
+			var/flesh_colour = get_trait(TRAIT_FLESH_COLOUR)
+			if(!flesh_colour) flesh_colour = get_trait(TRAIT_PRODUCT_COLOUR)
+			if(flesh_colour) splat.color = get_trait(TRAIT_PRODUCT_COLOUR)
 
 	if(chems)
 		for(var/mob/living/M in T.contents)
@@ -217,8 +233,9 @@
 			for(var/mob/living/M in T.contents)
 				apply_special_effect(M)
 			splatter(T,thrown)
-		origin_turf.visible_message("<span class='danger'>The [thrown.name] explodes!</span>")
-		del(thrown)
+		if(origin_turf)
+			origin_turf.visible_message("<span class='danger'>The [thrown.name] explodes!</span>")
+		qdel(thrown)
 		return
 
 	if(istype(target,/mob/living))
@@ -230,8 +247,9 @@
 
 	if(get_trait(TRAIT_JUICY) && splatted)
 		splatter(origin_turf,thrown)
-		origin_turf.visible_message("<span class='danger'>The [thrown.name] splatters against [target]!</span>")
-		del(thrown)
+		if(origin_turf)
+			origin_turf.visible_message("<span class='danger'>The [thrown.name] splatters against [target]!</span>")
+		qdel(thrown)
 
 /datum/seed/proc/handle_environment(var/turf/current_turf, var/datum/gas_mixture/environment, var/light_supplied, var/check_only)
 
@@ -265,12 +283,11 @@
 
 	// Handle light requirements.
 	if(!light_supplied)
-		var/area/A = get_area(current_turf)
-		if(A)
-			if(A.lighting_use_dynamic)
-				light_supplied = max(0,min(10,current_turf.lighting_lumcount)-5)
-			else
-				light_supplied =  5
+		var/atom/movable/lighting_overlay/L = locate(/atom/movable/lighting_overlay) in current_turf
+		if(L)
+			light_supplied = max(0,min(10,L.lum_r + L.lum_g + L.lum_b)-5)
+		else
+			light_supplied =  5
 	if(light_supplied)
 		if(abs(light_supplied - get_trait(TRAIT_IDEAL_LIGHT)) > get_trait(TRAIT_LIGHT_TOLERANCE))
 			health_change += rand(1,3) * HYDRO_SPEED_MULTIPLIER
@@ -397,7 +414,9 @@
 			"slimejelly",
 			"cyanide",
 			"mindbreaker",
-			"stoxin"
+			"stoxin",
+			"acetone",
+			"hydrazine"
 			)
 
 		for(var/x=1;x<=additional_chems;x++)
@@ -624,7 +643,7 @@
 		if(GENE_STRUCTURE)
 			traits_to_copy = list(TRAIT_PLANT_ICON,TRAIT_PRODUCT_ICON,TRAIT_HARVEST_REPEAT)
 		if(GENE_FRUIT)
-			traits_to_copy = list(TRAIT_STINGS,TRAIT_EXPLOSIVE,TRAIT_JUICY)
+			traits_to_copy = list(TRAIT_STINGS,TRAIT_EXPLOSIVE,TRAIT_FLESH_COLOUR,TRAIT_JUICY)
 		if(GENE_SPECIAL)
 			traits_to_copy = list(TRAIT_TELEPORTING)
 
@@ -667,7 +686,6 @@
 					total_yield = get_trait(TRAIT_YIELD) + rand(yield_mod)
 				total_yield = max(1,total_yield)
 
-		currently_querying = list()
 		for(var/i = 0;i<total_yield;i++)
 			var/obj/item/product
 			if(has_mob_product)
@@ -675,19 +693,21 @@
 			else
 				product = new /obj/item/weapon/reagent_containers/food/snacks/grown(get_turf(user),name)
 			if(get_trait(TRAIT_PRODUCT_COLOUR))
-				product.color = get_trait(TRAIT_PRODUCT_COLOUR)
-				if(istype(product,/obj/item/weapon/reagent_containers/food))
-					var/obj/item/weapon/reagent_containers/food/food = product
-					food.filling_color = get_trait(TRAIT_PRODUCT_COLOUR)
+				if(!istype(product, /mob))
+					product.color = get_trait(TRAIT_PRODUCT_COLOUR)
+					if(istype(product,/obj/item/weapon/reagent_containers/food))
+						var/obj/item/weapon/reagent_containers/food/food = product
+						food.filling_color = get_trait(TRAIT_PRODUCT_COLOUR)
 
 			if(mysterious)
 				product.name += "?"
 				product.desc += " On second thought, something about this one looks strange."
 
 			if(get_trait(TRAIT_BIOLUM))
+				var/clr
 				if(get_trait(TRAIT_BIOLUM_COLOUR))
-					product.l_color = get_trait(TRAIT_BIOLUM_COLOUR)
-				product.SetLuminosity(get_trait(TRAIT_BIOLUM))
+					clr = get_trait(TRAIT_BIOLUM_COLOUR)
+				product.set_light(get_trait(TRAIT_BIOLUM), l_color = clr)
 
 			//Handle spawning in living, mobile products (like dionaea).
 			if(istype(product,/mob/living))
